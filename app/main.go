@@ -62,9 +62,18 @@ type Question struct {
 	Class uint16
 }
 
-func (q Question) EncodeDomain() []byte {
+type Answer struct {
+	Name       string
+	Type       uint16
+	Class      uint16
+	TimeToLive uint32
+	Length     uint16
+	Data       []byte
+}
+
+func EncodeDomain(name string) []byte {
 	b := make([]byte, 0)
-	for _, label := range strings.Split(q.Name, ".") {
+	for _, label := range strings.Split(name, ".") {
 		b = append(b, byte(len(label)))
 		b = append(b, label...)
 	}
@@ -75,9 +84,10 @@ func (q Question) EncodeDomain() []byte {
 type Message struct {
 	DnsHeader
 	Question
+	Answer
 }
 
-func NewMessage() Message {
+func NewMessage(Label string, data []byte) Message {
 
 	return Message{
 
@@ -85,14 +95,22 @@ func NewMessage() Message {
 			PacketId:              1234,
 			Flag:                  FlagQueryIndicator,
 			QuestionCount:         1,
-			AnswerRecordCount:     0,
+			AnswerRecordCount:     1,
 			AuthorityRecordCount:  0,
 			AdditionalRecordCount: 0,
 		},
 		Question: Question{
-			Name:  "",
+			Name:  Label,
 			Type:  TYPE_A,
 			Class: CLASS_IN,
+		},
+		Answer: Answer{
+			Name:       Label,
+			Type:       TYPE_A,
+			Class:      CLASS_IN,
+			TimeToLive: 60,
+			Length:     uint16(len(data)),
+			Data:       data,
 		},
 	}
 
@@ -108,9 +126,16 @@ func (m Message) Byte() []byte {
 	binary.BigEndian.PutUint16(b[8:10], m.DnsHeader.AuthorityRecordCount)
 	binary.BigEndian.PutUint16(b[10:12], m.DnsHeader.AdditionalRecordCount)
 
-	b = append(b, m.EncodeDomain()...)
+	b = append(b, EncodeDomain(m.Question.Name)...)
 	b = binary.BigEndian.AppendUint16(b, m.Question.Type)
 	b = binary.BigEndian.AppendUint16(b, m.Question.Class)
+
+	b = append(b, EncodeDomain(m.Answer.Name)...)
+	b = binary.BigEndian.AppendUint16(b, m.Answer.Type)
+	b = binary.BigEndian.AppendUint16(b, m.Answer.Class)
+	b = binary.BigEndian.AppendUint32(b, m.Answer.TimeToLive)
+	b = binary.BigEndian.AppendUint16(b, m.Answer.Length)
+	b = append(b, m.Answer.Data...)
 	return b
 
 }
@@ -158,10 +183,10 @@ func main() {
 		fmt.Printf("Domain :%s\n", domainName)
 		fmt.Printf("QType :%d\n", qtype)
 		fmt.Printf("QClass :%d\n", qclass)
-		response := NewMessage()
+
+		response := NewMessage(domainName, []byte("\x08\x08\x08\x08"))
 		response.DnsHeader.PacketId = packetId
 		response.DnsHeader.QuestionCount = qCount
-		response.Question.Name = domainName
 		response.Question.Type = qtype
 		response.Question.Class = qclass
 
