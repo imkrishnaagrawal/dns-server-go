@@ -154,8 +154,9 @@ func main() {
 			question := Question{}
 			question.Name, offset = DecodeDomain(buf, offset)
 			question.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
-			question.Class = binary.BigEndian.Uint16(buf[offset+2 : offset+4])
-
+			offset += 2
+			question.Class = binary.BigEndian.Uint16(buf[offset : offset+4])
+			offset += 2
 			requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
 			responseOpcode := requestOpcode << 11
 			requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
