@@ -113,59 +113,6 @@ func (m Message) Byte() []byte {
 
 }
 
-func ReadRequest(buf []byte) *Message {
-	request := Message{
-		Question: []Question{},
-	}
-	request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
-	request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
-	request.DnsHeader.QuestionCount = binary.BigEndian.Uint16(buf[4:6])
-	request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
-	request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
-	request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
-
-	var offset int = 12
-	for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
-		question := Question{}
-		question.Name, offset = DecodeDomain(buf, offset)
-		question.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
-		offset += 2
-		question.Class = binary.BigEndian.Uint16(buf[offset : offset+2])
-		offset += 2
-		requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
-		responseOpcode := requestOpcode << 11
-		requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
-		responseRecursionDesired := requestRecursionDesired << 8
-		var RCodeFlag uint16
-		if requestOpcode == 0 {
-			RCodeFlag = 0
-		} else {
-			RCodeFlag = 4
-		}
-
-		request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
-		request.Question = append(request.Question, question)
-	}
-	for i := 0; i < int(request.DnsHeader.AnswerRecordCount); i++ {
-		answer := Answer{}
-		answer.Name, _ = DecodeDomain(buf, offset)
-		offset += 2
-		answer.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
-		offset += 2
-		answer.Class = binary.BigEndian.Uint16(buf[offset : offset+2])
-		offset += 2
-		answer.TimeToLive = binary.BigEndian.Uint32(buf[offset : offset+4])
-		offset += 4
-		answer.Length = binary.BigEndian.Uint16(buf[offset : offset+2])
-		offset += 2
-		answer.Data = buf[offset : offset+int(answer.Length)]
-		offset += int(answer.Length)
-
-		request.Answer = append(request.Answer, answer)
-	}
-	return &request
-
-}
 func main() {
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
@@ -191,52 +138,54 @@ func main() {
 			fmt.Println("Error receiving data:", err)
 			break
 		}
-		// request := ReadRequest(buf)
 
-		addr, err := net.ResolveUDPAddr("udp", "1.1.1.1:53")
-		if err != nil {
-			fmt.Printf("error ResolveUDPAddr %s", err)
+		request := Message{
+			Question: []Question{},
 		}
-		conn, err := net.DialUDP("udp", nil, addr)
-		if err != nil {
-			fmt.Println("error DialUDP")
+		request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
+		request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
+		request.DnsHeader.QuestionCount = binary.BigEndian.Uint16(buf[4:6])
+		request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
+		request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
+		request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
+
+		var offset int = 12
+		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
+			question := Question{}
+			question.Name, offset = DecodeDomain(buf, offset)
+			question.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
+			offset += 2
+			question.Class = binary.BigEndian.Uint16(buf[offset : offset+4])
+			offset += 2
+			requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
+			responseOpcode := requestOpcode << 11
+			requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
+			responseRecursionDesired := requestRecursionDesired << 8
+			var RCodeFlag uint16
+			if requestOpcode == 0 {
+				RCodeFlag = 0
+			} else {
+				RCodeFlag = 4
+			}
+
+			request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
+			request.Question = append(request.Question, question)
 		}
-		_, err = conn.Write(buf)
-		if err != nil {
-			fmt.Println("error making forward request")
-		}
-
-		forwardBuf := make([]byte, 4096)
-		_, _, err = conn.ReadFromUDP(forwardBuf)
-		if err != nil {
-			fmt.Println("error reading forward request")
-		}
-
-		fRequest := ReadRequest(forwardBuf)
-
-		// fmt.Print(fRequest)
-
-		// _, err = udpConn.WriteToUDP(fRequest.Byte(), source)
-
-		// if err != nil {
-		// 	fmt.Println("error reading forward request")
-		// }
-
-		for i := 0; i < int(fRequest.DnsHeader.QuestionCount); i++ {
+		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
 			data := []byte("\x08\x08\x08\x08")
 			answer := Answer{}
-			answer.Name = fRequest.Question[i].Name
-			answer.Type = fRequest.Question[i].Type
-			answer.Class = fRequest.Question[i].Class
+			answer.Name = request.Question[i].Name
+			answer.Type = request.Question[i].Type
+			answer.Class = request.Question[i].Class
 			answer.TimeToLive = 60
 			answer.Length = uint16(len(data))
 			answer.Data = data
-			fRequest.Answer = append(fRequest.Answer, answer)
+			request.Answer = append(request.Answer, answer)
 		}
-		fRequest.DnsHeader.AnswerRecordCount = uint16(len(fRequest.Answer))
+		request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
 
-		fmt.Printf("Request :%+v\n", fRequest)
-		_, err = udpConn.WriteToUDP(fRequest.Byte(), source)
+		fmt.Printf("Request :%+v\n", request)
+		_, err = udpConn.WriteToUDP(request.Byte(), source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
 		}
