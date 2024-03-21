@@ -201,8 +201,9 @@ func DecodeDomain(buf []byte, offset int) (string, int) {
 		if num <= 0 {
 			break
 		} else if num&0xC0 == 0xC0 {
-			offset += 1
+			// offset += 1
 			pointer := int(buf[offset])
+			fmt.Println(int(buf[offset]), int(buf[offset+1]))
 			offset = int(num&0x3F)<<8 + pointer
 			var name string
 			name, offset = DecodeDomain(buf, offset)
