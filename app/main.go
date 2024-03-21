@@ -199,10 +199,15 @@ func DecodeDomain(buf []byte, offset int) (string, int) {
 		offset += 1
 		if num <= 0 {
 			break
+		} else if num&0xC0 == 0xC0 {
+			offset += 1
+			pointer := int(buf[offset])
+			offset = int(num&0x3F)<<8 + pointer
+		} else {
+			label := buf[offset : offset+num]
+			labels = append(labels, string(label))
+			offset += num
 		}
-		label := buf[offset : offset+num]
-		labels = append(labels, string(label))
-		offset += num
 
 	}
 	return strings.Join(labels, "."), offset
