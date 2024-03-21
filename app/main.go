@@ -160,37 +160,40 @@ func main() {
 	buf := make([]byte, 512)
 
 	for {
-		size, source, err := udpConn.ReadFromUDP(buf)
+		_, source, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
 			fmt.Println("Error receiving data:", err)
 			break
 		}
 
-		receivedData := string(buf[:size])
-		fmt.Printf("Received %d bytes from %s:: %s\n", size, source, receivedData)
+		// receivedData := string(buf[:size])
+		// fmt.Printf("Received %d bytes from %s:: %s\n", size, source, receivedData)
 
-		packetId := binary.BigEndian.Uint16(buf[:2])
-		qCount := binary.BigEndian.Uint16(buf[4:6])
+		request := Message{
+			Question: Question{},
+		}
+		request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
+		request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
+		request.DnsHeader.QuestionCount = binary.BigEndian.Uint16(buf[4:6])
+		request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
+		request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
+		request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
+
 		reader := bytes.NewReader(buf[12:])
-		domainName := DecodeDomain(reader)
+		request.Question.Name = DecodeDomain(reader)
+		binary.Read(reader, binary.BigEndian, &request.Question.Type)
+		binary.Read(reader, binary.BigEndian, &request.Question.Class)
 
-		var qtype uint16
-		var qclass uint16
-		binary.Read(reader, binary.BigEndian, &qtype)
-		binary.Read(reader, binary.BigEndian, &qclass)
+		data := []byte("\x08\x08\x08\x08")
+		request.DnsHeader.AnswerRecordCount = 1
+		request.Answer.Name = request.Question.Name
+		request.Answer.Type = request.Question.Type
+		request.Answer.Class = request.Question.Class
+		request.Answer.Length = uint16(len(data))
+		request.Answer.Data = data
 
-		fmt.Printf("QCount :%d\n", qCount)
-		fmt.Printf("Domain :%s\n", domainName)
-		fmt.Printf("QType :%d\n", qtype)
-		fmt.Printf("QClass :%d\n", qclass)
-
-		response := NewMessage(domainName, []byte("\x08\x08\x08\x08"))
-		response.DnsHeader.PacketId = packetId
-		response.DnsHeader.QuestionCount = qCount
-		response.Question.Type = qtype
-		response.Question.Class = qclass
-
-		_, err = udpConn.WriteToUDP(response.Byte(), source)
+		fmt.Printf("Request :%v+\n", request)
+		_, err = udpConn.WriteToUDP(request.Byte(), source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
 		}
