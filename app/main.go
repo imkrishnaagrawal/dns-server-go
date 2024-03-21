@@ -186,13 +186,16 @@ func main() {
 
 		data := []byte("\x08\x08\x08\x08")
 		request.DnsHeader.AnswerRecordCount = 1
+		request.DnsHeader.Flag = FlagQueryIndicator
+
 		request.Answer.Name = request.Question.Name
 		request.Answer.Type = request.Question.Type
 		request.Answer.Class = request.Question.Class
+		request.Answer.TimeToLive = 60
 		request.Answer.Length = uint16(len(data))
 		request.Answer.Data = data
 
-		fmt.Printf("Request :%v+\n", request)
+		fmt.Printf("Request :%+v\n", request)
 		_, err = udpConn.WriteToUDP(request.Byte(), source)
 		if err != nil {
 			fmt.Println("Failed to send response:", err)
