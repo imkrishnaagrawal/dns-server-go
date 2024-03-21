@@ -179,15 +179,17 @@ func main() {
 		request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
 		request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
 
-		opcode := request.DnsHeader.Flag >> 11 & 0xF
-
 		reader := bytes.NewReader(buf[12:])
 		request.Question.Name = DecodeDomain(reader)
 		binary.Read(reader, binary.BigEndian, &request.Question.Type)
 		binary.Read(reader, binary.BigEndian, &request.Question.Class)
 
+		requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
+		responseOpcode := requestOpcode << 11
+		requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
+		responseRecursionDesired := requestRecursionDesired << 8
 		var RCodeFlag uint16
-		if opcode == 0 {
+		if requestOpcode == 0 {
 			RCodeFlag = 0
 		} else {
 			RCodeFlag = 4
@@ -195,7 +197,7 @@ func main() {
 
 		data := []byte("\x08\x08\x08\x08")
 		request.DnsHeader.AnswerRecordCount = 1
-		request.DnsHeader.Flag = FlagQueryIndicator | FlagOperationCode | FlagRecursionDesired | RCodeFlag
+		request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
 
 		request.Answer.Name = request.Question.Name
 		request.Answer.Type = request.Question.Type
