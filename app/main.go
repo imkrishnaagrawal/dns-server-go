@@ -214,33 +214,32 @@ func main() {
 
 		fRequest := ReadRequest(forwardBuf)
 
-		fmt.Print(fRequest)
+		// fmt.Print(fRequest)
 
-		_, err = udpConn.WriteToUDP(fRequest.Byte(), source)
+		// _, err = udpConn.WriteToUDP(fRequest.Byte(), source)
 
-		if err != nil {
-			fmt.Println("error reading forward request")
-		}
-		// break
-
-		// for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
-		// 	data := []byte("\x08\x08\x08\x08")
-		// 	answer := Answer{}
-		// 	answer.Name = request.Question[i].Name
-		// 	answer.Type = request.Question[i].Type
-		// 	answer.Class = request.Question[i].Class
-		// 	answer.TimeToLive = 60
-		// 	answer.Length = uint16(len(data))
-		// 	answer.Data = data
-		// 	request.Answer = append(request.Answer, answer)
-		// }
-		// request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
-
-		// fmt.Printf("Request :%+v\n", request)
-		// _, err = udpConn.WriteToUDP(request.Byte(), source)
 		// if err != nil {
-		// 	fmt.Println("Failed to send response:", err)
+		// 	fmt.Println("error reading forward request")
 		// }
+
+		for i := 0; i < int(fRequest.DnsHeader.QuestionCount); i++ {
+			data := []byte("\x08\x08\x08\x08")
+			answer := Answer{}
+			answer.Name = fRequest.Question[i].Name
+			answer.Type = fRequest.Question[i].Type
+			answer.Class = fRequest.Question[i].Class
+			answer.TimeToLive = 60
+			answer.Length = uint16(len(data))
+			answer.Data = data
+			fRequest.Answer = append(fRequest.Answer, answer)
+		}
+		fRequest.DnsHeader.AnswerRecordCount = uint16(len(fRequest.Answer))
+
+		fmt.Printf("Request :%+v\n", fRequest)
+		_, err = udpConn.WriteToUDP(fRequest.Byte(), source)
+		if err != nil {
+			fmt.Println("Failed to send response:", err)
+		}
 	}
 }
 
