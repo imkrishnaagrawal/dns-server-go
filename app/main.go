@@ -181,6 +181,8 @@ func main() {
 			answer.Data = data
 			request.Answer = append(request.Answer, answer)
 		}
+		request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
+
 		fmt.Printf("Request :%+v\n", request)
 		_, err = udpConn.WriteToUDP(request.Byte(), source)
 		if err != nil {
