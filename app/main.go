@@ -184,9 +184,16 @@ func main() {
 		binary.Read(reader, binary.BigEndian, &request.Question.Type)
 		binary.Read(reader, binary.BigEndian, &request.Question.Class)
 
+		// var RCodeFlag uint16
+		// if opcode == 0 {
+		// 	RCodeFlag = FLAG_RCODE_NOERROR
+		// } else {
+		// 	RCodeFlag = FLAG_RCODE_NOTIMP
+		// }
+
 		data := []byte("\x08\x08\x08\x08")
 		request.DnsHeader.AnswerRecordCount = 1
-		request.DnsHeader.Flag = FlagQueryIndicator
+		request.DnsHeader.Flag = FlagQueryIndicator | FlagOperationCode | FlagRecursionDesired | FlagResponseCode
 
 		request.Answer.Name = request.Question.Name
 		request.Answer.Type = request.Question.Type
