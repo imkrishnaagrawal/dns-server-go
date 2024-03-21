@@ -166,9 +166,6 @@ func main() {
 			break
 		}
 
-		// receivedData := string(buf[:size])
-		// fmt.Printf("Received %d bytes from %s:: %s\n", size, source, receivedData)
-
 		request := Message{
 			Question: Question{},
 		}
