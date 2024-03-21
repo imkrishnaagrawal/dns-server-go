@@ -203,6 +203,10 @@ func DecodeDomain(buf []byte, offset int) (string, int) {
 			offset += 1
 			pointer := int(buf[offset])
 			offset = int(num&0x3F)<<8 + pointer
+			var name string
+			name, offset = DecodeDomain(buf, offset)
+			labels = append(labels, name)
+
 		} else {
 			label := buf[offset : offset+num]
 			labels = append(labels, string(label))
