@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -83,37 +82,8 @@ func EncodeDomain(name string) []byte {
 
 type Message struct {
 	DnsHeader
-	Question
-	Answer
-}
-
-func NewMessage(Label string, data []byte) Message {
-
-	return Message{
-
-		DnsHeader: DnsHeader{
-			PacketId:              1234,
-			Flag:                  FlagQueryIndicator,
-			QuestionCount:         1,
-			AnswerRecordCount:     1,
-			AuthorityRecordCount:  0,
-			AdditionalRecordCount: 0,
-		},
-		Question: Question{
-			Name:  Label,
-			Type:  TYPE_A,
-			Class: CLASS_IN,
-		},
-		Answer: Answer{
-			Name:       Label,
-			Type:       TYPE_A,
-			Class:      CLASS_IN,
-			TimeToLive: 60,
-			Length:     uint16(len(data)),
-			Data:       data,
-		},
-	}
-
+	Question []Question
+	Answer   []Answer
 }
 
 func (m Message) Byte() []byte {
@@ -126,16 +96,19 @@ func (m Message) Byte() []byte {
 	binary.BigEndian.PutUint16(b[8:10], m.DnsHeader.AuthorityRecordCount)
 	binary.BigEndian.PutUint16(b[10:12], m.DnsHeader.AdditionalRecordCount)
 
-	b = append(b, EncodeDomain(m.Question.Name)...)
-	b = binary.BigEndian.AppendUint16(b, m.Question.Type)
-	b = binary.BigEndian.AppendUint16(b, m.Question.Class)
-
-	b = append(b, EncodeDomain(m.Answer.Name)...)
-	b = binary.BigEndian.AppendUint16(b, m.Answer.Type)
-	b = binary.BigEndian.AppendUint16(b, m.Answer.Class)
-	b = binary.BigEndian.AppendUint32(b, m.Answer.TimeToLive)
-	b = binary.BigEndian.AppendUint16(b, m.Answer.Length)
-	b = append(b, m.Answer.Data...)
+	for i := 0; i < int(m.DnsHeader.QuestionCount); i++ {
+		b = append(b, EncodeDomain(m.Question[i].Name)...)
+		b = binary.BigEndian.AppendUint16(b, m.Question[i].Type)
+		b = binary.BigEndian.AppendUint16(b, m.Question[i].Class)
+	}
+	for i := 0; i < int(m.DnsHeader.QuestionCount); i++ {
+		b = append(b, EncodeDomain(m.Answer[i].Name)...)
+		b = binary.BigEndian.AppendUint16(b, m.Answer[i].Type)
+		b = binary.BigEndian.AppendUint16(b, m.Answer[i].Class)
+		b = binary.BigEndian.AppendUint32(b, m.Answer[i].TimeToLive)
+		b = binary.BigEndian.AppendUint16(b, m.Answer[i].Length)
+		b = append(b, m.Answer[i].Data...)
+	}
 	return b
 
 }
@@ -167,7 +140,7 @@ func main() {
 		}
 
 		request := Message{
-			Question: Question{},
+			Question: []Question{},
 		}
 		request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
 		request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
@@ -176,33 +149,38 @@ func main() {
 		request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
 		request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
 
-		reader := bytes.NewReader(buf[12:])
-		request.Question.Name = DecodeDomain(reader)
-		binary.Read(reader, binary.BigEndian, &request.Question.Type)
-		binary.Read(reader, binary.BigEndian, &request.Question.Class)
+		var offset int = 12
+		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
+			question := Question{}
+			question.Name, offset = DecodeDomain(buf, offset)
+			question.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
+			question.Class = binary.BigEndian.Uint16(buf[offset+2 : offset+4])
 
-		requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
-		responseOpcode := requestOpcode << 11
-		requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
-		responseRecursionDesired := requestRecursionDesired << 8
-		var RCodeFlag uint16
-		if requestOpcode == 0 {
-			RCodeFlag = 0
-		} else {
-			RCodeFlag = 4
+			requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
+			responseOpcode := requestOpcode << 11
+			requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
+			responseRecursionDesired := requestRecursionDesired << 8
+			var RCodeFlag uint16
+			if requestOpcode == 0 {
+				RCodeFlag = 0
+			} else {
+				RCodeFlag = 4
+			}
+
+			request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
+			request.Question = append(request.Question, question)
 		}
-
-		data := []byte("\x08\x08\x08\x08")
-		request.DnsHeader.AnswerRecordCount = 1
-		request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
-
-		request.Answer.Name = request.Question.Name
-		request.Answer.Type = request.Question.Type
-		request.Answer.Class = request.Question.Class
-		request.Answer.TimeToLive = 60
-		request.Answer.Length = uint16(len(data))
-		request.Answer.Data = data
-
+		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
+			data := []byte("\x08\x08\x08\x08")
+			answer := Answer{}
+			answer.Name = request.Question[i].Name
+			answer.Type = request.Question[i].Type
+			answer.Class = request.Question[i].Class
+			answer.TimeToLive = 60
+			answer.Length = uint16(len(data))
+			answer.Data = data
+			request.Answer = append(request.Answer, answer)
+		}
 		fmt.Printf("Request :%+v\n", request)
 		_, err = udpConn.WriteToUDP(request.Byte(), source)
 		if err != nil {
@@ -211,25 +189,20 @@ func main() {
 	}
 }
 
-func DecodeDomain(reader *bytes.Reader) string {
+func DecodeDomain(buf []byte, offset int) (string, int) {
 	labels := []string{}
-	var num uint8
+
 	for {
-		err := binary.Read(reader, binary.BigEndian, &num)
-		if err != nil {
-			fmt.Println("Failed To Read Label Size", err)
-		}
+		var num int = int(buf[offset])
+		offset += 1
 		if num <= 0 {
 			break
 		}
-		label := make([]byte, num)
-		err = binary.Read(reader, binary.BigEndian, &label)
-		if err != nil {
-			fmt.Println("Failed To Read Label", err)
-		}
+		label := buf[offset : offset+num]
 		labels = append(labels, string(label))
-	}
+		offset += num
 
-	return strings.Join(labels, ".")
+	}
+	return strings.Join(labels, "."), offset
 
 }
