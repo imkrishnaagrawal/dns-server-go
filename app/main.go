@@ -148,6 +148,17 @@ func main() {
 		request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
 		request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
 		request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
+		requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
+		responseOpcode := requestOpcode << 11
+		requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
+		responseRecursionDesired := requestRecursionDesired << 8
+		var RCodeFlag uint16
+		if requestOpcode == 0 {
+			RCodeFlag = 0
+		} else {
+			RCodeFlag = 4
+		}
+		request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
 
 		var offset int = 12
 		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
@@ -157,18 +168,6 @@ func main() {
 			offset += 2
 			question.Class = binary.BigEndian.Uint16(buf[offset : offset+4])
 			offset += 2
-			requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
-			responseOpcode := requestOpcode << 11
-			requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
-			responseRecursionDesired := requestRecursionDesired << 8
-			var RCodeFlag uint16
-			if requestOpcode == 0 {
-				RCodeFlag = 0
-			} else {
-				RCodeFlag = 4
-			}
-
-			request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
 			request.Question = append(request.Question, question)
 		}
 		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
@@ -203,11 +202,6 @@ func DecodeDomain(buf []byte, offset int) (string, int) {
 		} else if num&0xC0 == 0xC0 {
 			pointer := int(buf[offset])
 			offset = int(num&0x3F)<<8 + pointer
-			// var name string
-			// name, _ = DecodeDomain(buf, offset)
-			// offset += newOffset
-			// labels = append(labels, name)
-
 		} else {
 			label := buf[offset : offset+num]
 			labels = append(labels, string(label))
