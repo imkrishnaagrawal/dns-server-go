@@ -186,7 +186,7 @@ func main() {
 
 		data := []byte("\x08\x08\x08\x08")
 		request.DnsHeader.AnswerRecordCount = 1
-		request.DnsHeader.Flag = FlagQueryIndicator | FlagOperationCode | FlagRecursionDesired
+		request.DnsHeader.Flag = FlagQueryIndicator
 
 		request.Answer.Name = request.Question.Name
 		request.Answer.Type = request.Question.Type
