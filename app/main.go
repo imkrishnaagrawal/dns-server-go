@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"flag"
 	"fmt"
 	"net"
 	"strings"
@@ -114,7 +113,13 @@ func (m Message) Byte() []byte {
 
 }
 
-func SetResponseFlag(request *Message) {
+func ReadHeader(buf []byte, request *Message) {
+	request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
+	request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
+	request.DnsHeader.QuestionCount = binary.BigEndian.Uint16(buf[4:6])
+	request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
+	request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
+	request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
 	requestOpcode := request.DnsHeader.Flag >> 11 & 0xF
 	responseOpcode := requestOpcode << 11
 	requestRecursionDesired := request.DnsHeader.Flag >> 8 & 0x1
@@ -126,15 +131,6 @@ func SetResponseFlag(request *Message) {
 		RCodeFlag = 4
 	}
 	request.DnsHeader.Flag = FlagQueryIndicator | responseOpcode | responseRecursionDesired | RCodeFlag
-}
-
-func ReadHeader(buf []byte, request *Message) {
-	request.DnsHeader.PacketId = binary.BigEndian.Uint16(buf[:2])
-	request.DnsHeader.Flag = binary.BigEndian.Uint16(buf[2:4])
-	request.DnsHeader.QuestionCount = binary.BigEndian.Uint16(buf[4:6])
-	request.DnsHeader.AnswerRecordCount = binary.BigEndian.Uint16(buf[6:8])
-	request.DnsHeader.AuthorityRecordCount = binary.BigEndian.Uint16(buf[8:10])
-	request.DnsHeader.AdditionalRecordCount = binary.BigEndian.Uint16(buf[10:12])
 
 }
 
@@ -156,8 +152,8 @@ func ReadAnswer(buf []byte, request *Message, offset int) int {
 
 	for i := 0; i < int(request.DnsHeader.AnswerRecordCount); i++ {
 		answer := Answer{}
-		answer.Name, offset = DecodeDomain(buf, offset)
-
+		answer.Name, _ = DecodeDomain(buf, offset)
+		offset += 2
 		answer.Type = binary.BigEndian.Uint16(buf[offset : offset+2])
 		offset += 2
 		answer.Class = binary.BigEndian.Uint16(buf[offset : offset+2])
@@ -173,9 +169,9 @@ func ReadAnswer(buf []byte, request *Message, offset int) int {
 	return offset
 }
 
-func ForwardRequest(request []byte, rawAddress string) *Message {
+func ForwardRequest(request []byte) *Message {
 
-	addr, err := net.ResolveUDPAddr("udp", rawAddress)
+	addr, err := net.ResolveUDPAddr("udp", "1.1.1.1:53")
 	if err != nil {
 		fmt.Printf("error ResolveUDPAddr %s", err)
 	}
@@ -183,48 +179,26 @@ func ForwardRequest(request []byte, rawAddress string) *Message {
 	if err != nil {
 		fmt.Println("error DialUDP")
 	}
-	defer conn.Close()
 	_, err = conn.Write(request)
 	if err != nil {
 		fmt.Println("error making forward request")
 	}
 
-	responseBuf := make([]byte, 512)
-	size, _, err := conn.ReadFromUDP(responseBuf)
+	responseBuf := make([]byte, 4096)
+	_, _, err = conn.ReadFromUDP(responseBuf)
 	if err != nil {
 		fmt.Println("error reading forward request")
 	}
 
+	// fmt.Println("COmplete")
 	response := Message{}
-	ReadHeader(responseBuf[:size], &response)
-	qoffset := ReadQuestion(responseBuf[:size], &response)
-	ReadAnswer(responseBuf[:size], &response, qoffset)
-	// SetResponseFlag(&response)
-	fmt.Println("f->", responseBuf[qoffset:size])
-	fmt.Println("n->", response.Byte()[qoffset:size])
+	ReadHeader(responseBuf, &response)
+	offset := ReadQuestion(responseBuf, &response)
+	ReadAnswer(responseBuf, &response, offset)
+
 	return &response
 }
-
-func NewResponse(request *Message) {
-	for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
-		data := []byte("\x08\x08\x08\x08")
-		answer := Answer{}
-		answer.Name = request.Question[i].Name
-		answer.Type = request.Question[i].Type
-		answer.Class = request.Question[i].Class
-		answer.TimeToLive = 60
-		answer.Length = uint16(len(data))
-		answer.Data = data
-		request.Answer = append(request.Answer, answer)
-	}
-}
-
 func main() {
-
-	resolverOption := flag.String("resolver", "", "DNS resolver address")
-	flag.Parse()
-	fmt.Println(*resolverOption)
-	fmt.Println(len(*resolverOption))
 	// You can use print statements as follows for debugging, they'll be visible when running tests.
 	fmt.Println("Logs from your program will appear here!")
 
@@ -244,74 +218,59 @@ func main() {
 	buf := make([]byte, 512)
 
 	for {
-		size, source, err := udpConn.ReadFromUDP(buf)
+		_, source, err := udpConn.ReadFromUDP(buf)
 		if err != nil {
 			fmt.Println("Error receiving data:", err)
 			break
 		}
 
-		request := Message{}
-		ReadHeader(buf[:size], &request)
-		ReadQuestion(buf[:size], &request)
-		if len(*resolverOption) > 0 {
-
-			forwardResp := ForwardRequest(request.Byte(), *resolverOption)
-			// request.DnsHeader = forwardResp.DnsHeader
-			// request.Question = forwardResp.Question
-			// request.Answer = forwardResp.Answer
-
-			_, err = udpConn.WriteToUDP(forwardResp.Byte(), source)
-			if err != nil {
-				fmt.Println("Failed to send response:", err)
-			}
-			fmt.Printf("Request :%+v\n", forwardResp)
-		} else {
-			NewResponse(&request)
-			request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
-			SetResponseFlag(&request)
-			fmt.Printf("Request :%+v\n", request)
-			_, err = udpConn.WriteToUDP(request.Byte(), source)
-			if err != nil {
-				fmt.Println("Failed to send response:", err)
-			}
+		request := Message{
+			Question: []Question{},
 		}
+		ReadHeader(buf, &request)
+		ReadQuestion(buf, &request)
 
-		// request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
+		ForwardRequest(buf)
 
+		for i := 0; i < int(request.DnsHeader.QuestionCount); i++ {
+			data := []byte("\x08\x08\x08\x08")
+			answer := Answer{}
+			answer.Name = request.Question[i].Name
+			answer.Type = request.Question[i].Type
+			answer.Class = request.Question[i].Class
+			answer.TimeToLive = 60
+			answer.Length = uint16(len(data))
+			answer.Data = data
+			request.Answer = append(request.Answer, answer)
+		}
+		request.DnsHeader.AnswerRecordCount = uint16(len(request.Answer))
+
+		fmt.Printf("Request :%+v\n", request)
+		_, err = udpConn.WriteToUDP(request.Byte(), source)
+		if err != nil {
+			fmt.Println("Failed to send response:", err)
+		}
 	}
 }
 
 func DecodeDomain(buf []byte, offset int) (string, int) {
 	labels := []string{}
-	// originalOffset := offset
 
 	for {
 		var num int = int(buf[offset])
-		offset++
-
-		if num == 0 {
-			break // End of the domain name
-		}
-
-		if num&0xC0 == 0xC0 {
-			// The next byte is part of the pointer offset, so we combine it with the lower bits of the current byte
-			pointer := int(num&0x3F)<<8 + int(buf[offset])
-			offset++ // Move past the second byte of the pointer
-
-			// Decode the domain part pointed to by the pointer. Note: We don't update 'offset' here because
-			// it should continue from where the pointer was encountered.
-			// 'DecodeDomain' is recursively called with the calculated pointer position.
-			// We ignore the returned new offset because it's irrelevant outside the recursive context.
-			part, _ := DecodeDomain(buf, pointer)
-			labels = append(labels, part)
-			break // A pointer always terminates the encoding of the current label.
+		offset += 1
+		if num <= 0 {
+			break
+		} else if num&0xC0 == 0xC0 {
+			pointer := int(buf[offset])
+			offset = int(num&0x3F)<<8 + pointer
 		} else {
-			// This is a standard label, not a pointer.
-			label := string(buf[offset : offset+num])
-			labels = append(labels, label)
+			label := buf[offset : offset+num]
+			labels = append(labels, string(label))
 			offset += num
 		}
-	}
 
+	}
 	return strings.Join(labels, "."), offset
+
 }
